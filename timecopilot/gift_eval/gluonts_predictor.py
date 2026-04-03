@@ -96,6 +96,7 @@ class GluonTSPredictor(RepresentablePredictor):
             uid_df = pd.DataFrame(
                 {
                     "unique_id": uid,
+                    "source_item_id": entry["item_id"],
                     "ds": ds,
                     "y": target,
                 }
