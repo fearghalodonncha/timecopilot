@@ -1,5 +1,6 @@
 from collections.abc import Iterable
 
+import numpy as np
 import pandas as pd
 import torch
 from utilsforecast.processing import make_future_dataframe
@@ -60,3 +61,21 @@ class TimeSeriesDataset:
             return self.data[start_idx:end_idx]
         else:
             raise StopIteration
+
+
+def flatten_forecast_values(
+    values: np.ndarray,
+    *,
+    expected_rows: int,
+    model_alias: str,
+    column_name: str,
+) -> np.ndarray:
+    flat_values = np.asarray(values).reshape(-1)
+    if len(flat_values) != expected_rows:
+        raise ValueError(
+            f"{model_alias} produced {len(flat_values)} values for `{column_name}`, "
+            f"but the forecast frame expects {expected_rows}. This usually means "
+            "the backend only returned a subset of internal batches. Try increasing "
+            "the model batch_size so the request fits in a single batch."
+        )
+    return flat_values

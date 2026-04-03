@@ -8,7 +8,7 @@ from tsfm_public import FlowStateForPrediction
 from tsfm_public.models.flowstate.utils.utils import get_fixed_factor
 
 from ..utils.forecaster import Forecaster, QuantileConverter, _DataProcessor
-from .utils import TimeSeriesDataset
+from .utils import TimeSeriesDataset, flatten_forecast_values
 
 
 class FlowState(Forecaster, _DataProcessor):
@@ -244,12 +244,21 @@ class FlowState(Forecaster, _DataProcessor):
                 supported_quantiles=supported_quantiles,
                 scale_factor=scale_factor,
             )
-        fcst_df[self.alias] = fcsts_mean_np.reshape(-1, 1)
+        fcst_df[self.alias] = flatten_forecast_values(
+            fcsts_mean_np,
+            expected_rows=len(fcst_df),
+            model_alias=self.alias,
+            column_name=self.alias,
+        )
         if qc.quantiles is not None and fcsts_quantiles_np is not None:
             for i, q in enumerate(qc.quantiles):
-                fcst_df[f"{self.alias}-q-{int(q * 100)}"] = fcsts_quantiles_np[
-                    ..., i
-                ].reshape(-1, 1)
+                col_name = f"{self.alias}-q-{int(q * 100)}"
+                fcst_df[col_name] = flatten_forecast_values(
+                    fcsts_quantiles_np[..., i],
+                    expected_rows=len(fcst_df),
+                    model_alias=self.alias,
+                    column_name=col_name,
+                )
             fcst_df = qc.maybe_convert_quantiles_to_level(
                 fcst_df,
                 models=[self.alias],

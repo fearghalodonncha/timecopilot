@@ -12,7 +12,7 @@ from timesfm_v1.timesfm_base import DEFAULT_QUANTILES as DEFAULT_QUANTILES_TFM
 from tqdm import tqdm
 
 from ..utils.forecaster import Forecaster, QuantileConverter
-from .utils import TimeSeriesDataset
+from .utils import TimeSeriesDataset, flatten_forecast_values
 
 
 class _TimesFMV1(Forecaster):
@@ -217,12 +217,21 @@ class _TimesFMV2_p5(Forecaster):
                 dataset,
                 h,
             )
-        fcst_df[self.alias] = fcsts_mean_np.reshape(-1, 1)
+        fcst_df[self.alias] = flatten_forecast_values(
+            fcsts_mean_np,
+            expected_rows=len(fcst_df),
+            model_alias=self.alias,
+            column_name=self.alias,
+        )
         if qc.quantiles is not None:
             for i, q in enumerate(qc.quantiles):
-                fcst_df[f"{self.alias}-q-{int(q * 100)}"] = fcsts_quantiles_np[
-                    ..., i + 1  # skip the first quantile (mean)
-                ].reshape(-1, 1)
+                col_name = f"{self.alias}-q-{int(q * 100)}"
+                fcst_df[col_name] = flatten_forecast_values(
+                    fcsts_quantiles_np[..., i + 1],  # skip the first quantile (mean)
+                    expected_rows=len(fcst_df),
+                    model_alias=self.alias,
+                    column_name=col_name,
+                )
             fcst_df = qc.maybe_convert_quantiles_to_level(
                 fcst_df,
                 models=[self.alias],

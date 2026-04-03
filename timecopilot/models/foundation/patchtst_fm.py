@@ -7,7 +7,7 @@ from tqdm import tqdm
 from tsfm_public import PatchTSTFMForPrediction
 
 from ..utils.forecaster import Forecaster, QuantileConverter, _DataProcessor
-from .utils import TimeSeriesDataset
+from .utils import TimeSeriesDataset, flatten_forecast_values
 
 # default to the median quantile
 # PatchTST-FM supports quantiles from 0.01 to 0.99
@@ -260,14 +260,23 @@ class PatchTSTFM(Forecaster, _DataProcessor):
                 # scale_factor=scale_factor,
             )
 
-        fcst_df[self.alias] = fcsts_mean_np.reshape(-1)
+        fcst_df[self.alias] = flatten_forecast_values(
+            fcsts_mean_np,
+            expected_rows=len(fcst_df),
+            model_alias=self.alias,
+            column_name=self.alias,
+        )
 
         # should only enter when quantiles are used
         if qc.quantiles is not None and fcsts_quantiles_np is not None:
             for i, q in enumerate(qc.quantiles):
-                fcst_df[f"{self.alias}-q-{int(q * 100)}"] = fcsts_quantiles_np[
-                    ..., i
-                ].reshape(-1)
+                col_name = f"{self.alias}-q-{int(q * 100)}"
+                fcst_df[col_name] = flatten_forecast_values(
+                    fcsts_quantiles_np[..., i],
+                    expected_rows=len(fcst_df),
+                    model_alias=self.alias,
+                    column_name=col_name,
+                )
             fcst_df = qc.maybe_convert_quantiles_to_level(
                 fcst_df,
                 models=[self.alias],
