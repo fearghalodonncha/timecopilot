@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+import logging
 
 import numpy as np
 import pandas as pd
@@ -9,6 +10,8 @@ from tsfm_public.models.flowstate.utils.utils import get_fixed_factor
 
 from ..utils.forecaster import Forecaster, QuantileConverter, _DataProcessor
 from .utils import TimeSeriesDataset, flatten_forecast_values
+
+LOGGER = logging.getLogger(__name__)
 
 
 class FlowState(Forecaster, _DataProcessor):
@@ -96,7 +99,8 @@ class FlowState(Forecaster, _DataProcessor):
             yield model
         finally:
             del model
-            torch.cuda.empty_cache()
+            if self.device.startswith("cuda"):
+                torch.cuda.empty_cache()
 
     def _predict_batch(
         self,
@@ -111,23 +115,58 @@ class FlowState(Forecaster, _DataProcessor):
         if context.shape[1] > self.context_length:
             context = context[..., -self.context_length :]
         context = self._maybe_impute_missing(context)
-        # context is (batch, context_length)
-        # then we convert it to (context_length, batch, 1)
-        context = context.unsqueeze(-1).transpose(0, 1)
-        context = context.to(self.device)
-        # (batch, quantiles, h, n_ch)
-        fcst = model(
-            context,
+        context = context.unsqueeze(-1).to(self.device)
+        outputs = model(
+            past_values=context,
             prediction_length=h,
             scale_factor=scale_factor,
-            batch_first=False,
-        ).prediction_outputs
-        fcst = fcst.squeeze(-1).transpose(-1, -2)  # now shape is (batch, h, quantiles)
-        fcst_mean = fcst[..., supported_quantiles.index(0.5)]
-        fcst_mean_np = fcst_mean.detach().numpy(force=True)
-        fcst_quantiles_np = (
-            fcst.detach().numpy(force=True) if quantiles is not None else None
+            batch_first=True,
         )
+        point_fcst = outputs.prediction_outputs
+        if point_fcst.ndim == 3 and point_fcst.shape[-1] == 1:
+            point_fcst = point_fcst.squeeze(-1)
+        if point_fcst.ndim != 2:
+            raise ValueError(
+                f"{self.alias} point output must have shape (batch, horizon); got {tuple(point_fcst.shape)}."
+            )
+        if point_fcst.shape[1] < h:
+            raise ValueError(
+                f"{self.alias} returned horizon {point_fcst.shape[1]}, expected at least {h}."
+            )
+        fcst_mean_np = point_fcst[:, :h].detach().cpu().numpy()
+
+        fcst_quantiles_np = None
+        if quantiles is not None:
+            fcst_quantiles = outputs.quantile_outputs
+            if fcst_quantiles is None:
+                raise ValueError(f"{self.alias} did not return quantile outputs.")
+            # New API: [batch, num_quantiles, horizon, channels]
+            # Older/commented layouts may include a leading channel axis for univariate models.
+            if fcst_quantiles.ndim == 5 and fcst_quantiles.shape[0] == 1:
+                fcst_quantiles = fcst_quantiles.squeeze(0)
+            if fcst_quantiles.ndim == 4 and fcst_quantiles.shape[-1] == 1:
+                fcst_quantiles = fcst_quantiles.squeeze(-1)
+            if fcst_quantiles.ndim != 3:
+                raise ValueError(
+                    f"{self.alias} quantile output must have 3 dims after squeezing; got {tuple(fcst_quantiles.shape)}."
+                )
+            # Normalize to [batch, horizon, num_quantiles].
+            if fcst_quantiles.shape[1] == len(supported_quantiles) and fcst_quantiles.shape[2] >= h:
+                fcst_quantiles = fcst_quantiles[:, :, :h].transpose(1, 2)
+            elif fcst_quantiles.shape[2] == len(supported_quantiles) and fcst_quantiles.shape[1] >= h:
+                fcst_quantiles = fcst_quantiles[:, :h, :]
+            else:
+                raise ValueError(
+                    f"{self.alias} could not interpret quantile output shape {tuple(fcst_quantiles.shape)} "
+                    f"for horizon={h} and num_quantiles={len(supported_quantiles)}."
+                )
+            fcst_quantiles_np = fcst_quantiles.detach().cpu().numpy()
+            LOGGER.info(
+                "%s point_shape=%s quantile_shape=%s",
+                self.alias,
+                tuple(fcst_mean_np.shape),
+                tuple(fcst_quantiles_np.shape),
+            )
         return fcst_mean_np, fcst_quantiles_np
 
     def _predict(

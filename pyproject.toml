@@ -89,7 +89,7 @@ dependencies = [
   "tabpfn-time-series==1.0.3 ; python_full_version < '3.13'",
   "tensorboard>=2.20.0",
   "timecopilot-chronos-forecasting>=0.2.1",
-  "timecopilot-granite-tsfm>=0.1.2",
+  "granite-tsfm>=0.3.0",
   "timecopilot-timesfm>=0.2.1",
   "timecopilot-tirex>=0.1.0 ; python_full_version >= '3.11'",
   "timecopilot-toto>=0.1.5",
@@ -126,6 +126,9 @@ omit = [
 
 [tool.hatch.metadata]
 allow-direct-references = true
+
+[tool.uv.sources]
+granite-tsfm = { path = "/Users/fearghalodonncha/Work/DigitalTwin/CBM/experimental_examples/granite-tsfm", editable = true }
 
 [tool.mypy]
 disable_error_code = ["no-redef"] # for fasthtml

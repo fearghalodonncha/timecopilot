@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+import logging
 
 import numpy as np
 import pandas as pd
@@ -8,6 +9,8 @@ from tsfm_public import PatchTSTFMForPrediction
 
 from ..utils.forecaster import Forecaster, QuantileConverter, _DataProcessor
 from .utils import TimeSeriesDataset, flatten_forecast_values
+
+LOGGER = logging.getLogger(__name__)
 
 # default to the median quantile
 # PatchTST-FM supports quantiles from 0.01 to 0.99
@@ -121,25 +124,57 @@ class PatchTSTFM(Forecaster, _DataProcessor):
         # input shape: (id_group/batch, data)
         # output shape: (batch/id, quantiles, h)
         quantile_levels = DEFAULT_QUANTILES if quantiles is None else quantiles
-
-        fcst = model(
+        outputs = model(
             context,
             prediction_length=h,
             quantile_levels=quantile_levels,
-            # scale_factor=scale_factor,
-            # batch_first=False,
-        ).quantile_predictions
-        fcst = fcst.squeeze(-1).transpose(-1, -2)  # now shape is (batch, h, quantiles)
-
-        # may not be the ideal solution, but this should be more adaptable
-        # when quantiles can vary.
-        # there is no guarantee that 0.5 will be in the list of quantiles.
-        fcst_mean = fcst.mean(dim=-1).squeeze() if fcst.ndim >= 3 else fcst.squeeze()
-        # fcst_mean = fcst[..., quantile_levels.index(0.5)].squeeze()
-        fcst_mean_np = fcst_mean.detach().cpu().numpy()
-        fcst_quantiles_np = (
-            fcst.detach().cpu().numpy() if quantiles is not None else None
         )
+
+        point_fcst = outputs.prediction_outputs
+        if isinstance(point_fcst, list):
+            raise ValueError(f"{self.alias} returned list outputs; tensor batch output expected.")
+        if point_fcst.ndim == 3 and point_fcst.shape[-1] == 1:
+            point_fcst = point_fcst.squeeze(-1)
+        if point_fcst.ndim != 2:
+            raise ValueError(
+                f"{self.alias} point output must have shape (batch, horizon); got {tuple(point_fcst.shape)}."
+            )
+        if point_fcst.shape[1] < h:
+            raise ValueError(
+                f"{self.alias} returned horizon {point_fcst.shape[1]}, expected at least {h}."
+            )
+        fcst_mean_np = point_fcst[:, :h].detach().cpu().numpy()
+
+        fcst_quantiles_np = None
+        if quantiles is not None:
+            fcst = outputs.quantile_outputs
+            if fcst is None:
+                raise ValueError(f"{self.alias} did not return quantile outputs.")
+            if isinstance(fcst, list):
+                raise ValueError(f"{self.alias} returned list quantile outputs; tensor batch output expected.")
+            if fcst.ndim == 4 and fcst.shape[-1] == 1:
+                fcst = fcst.squeeze(-1)
+            if fcst.ndim != 3:
+                raise ValueError(
+                    f"{self.alias} quantile output must have 3 dims after squeezing; got {tuple(fcst.shape)}."
+                )
+            # Normalize to [batch, horizon, quantile].
+            if fcst.shape[1] == len(quantile_levels) and fcst.shape[2] >= h:
+                fcst = fcst[:, :, :h].transpose(1, 2)
+            elif fcst.shape[2] == len(quantile_levels) and fcst.shape[1] >= h:
+                fcst = fcst[:, :h, :]
+            else:
+                raise ValueError(
+                    f"{self.alias} could not interpret quantile output shape {tuple(fcst.shape)} "
+                    f"for horizon={h} and num_quantiles={len(quantile_levels)}."
+                )
+            fcst_quantiles_np = fcst.detach().cpu().numpy()
+            LOGGER.info(
+                "%s point_shape=%s quantile_shape=%s",
+                self.alias,
+                tuple(fcst_mean_np.shape),
+                tuple(fcst_quantiles_np.shape),
+            )
         return fcst_mean_np, fcst_quantiles_np
 
     def _predict(
