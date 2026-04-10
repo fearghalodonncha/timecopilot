@@ -58,7 +58,6 @@ def _build_models(
         ),
         "ttm-r3": lambda: TTMR3(
             batch_size=batch_size,
-            model_revision="512-30-dec-90-lite-r3",
         ),
         "flowstate": lambda: FlowState(
             context_length=512,

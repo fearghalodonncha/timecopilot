@@ -62,15 +62,32 @@ class TTMR3(Forecaster, _DataProcessor):
             h,
             self.use_lite,
         )
-        model = get_model(
-            model_path=self.repo_id,
-            model_name="ttm",
-            context_length=self.context_length,
-            prediction_length=h,
-            freq=freq,
-            use_lite=self.use_lite,
-            model_revision=self.model_revision,
-        ).to(self.device)
+        try:
+            model = get_model(
+                model_path=self.repo_id,
+                model_name="ttm",
+                context_length=self.context_length,
+                prediction_length=h,
+                freq=freq,
+                use_lite=self.use_lite,
+                model_revision=self.model_revision,
+            ).to(self.device)
+        except ValueError as exc:
+            if "prediction_filter_length should be positive" in str(exc):
+                revision_msg = (
+                    f"Requested TTMR3 revision `{self.model_revision}`"
+                    if self.model_revision is not None
+                    else "The selected TTMR3 revision"
+                )
+                raise ValueError(
+                    f"{revision_msg} is incompatible with forecast horizon h={h}. "
+                    "This usually means the revision's native prediction length is "
+                    "shorter than the requested horizon. Leave `model_revision=None` "
+                    "to let `tsfm_public` auto-select a compatible R3 revision, or "
+                    "choose a revision whose prediction length is at least the "
+                    "requested horizon."
+                ) from exc
+            raise
         if hasattr(model.config, "multi_quantile_head"):
             model.config.multi_quantile_head = True
         if hasattr(model.config, "quantile_list"):
