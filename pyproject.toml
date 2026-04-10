@@ -128,7 +128,7 @@ omit = [
 allow-direct-references = true
 
 [tool.uv.sources]
-granite-tsfm = { path = "/Users/fearghalodonncha/Work/DigitalTwin/CBM/experimental_examples/granite-tsfm", editable = true }
+granite-tsfm = { git = "https://github.com/ibm-granite/granite-tsfm.git", rev = "ttm-r3-release-mq2" }
 
 [tool.mypy]
 disable_error_code = ["no-redef"] # for fasthtml

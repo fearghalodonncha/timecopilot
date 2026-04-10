@@ -13,4 +13,4 @@ version = "0.2.0"
 
 [tool.uv.sources]
 timecopilot = { path = "../..", editable = true }
-granite-tsfm = { path = "/Users/fearghalodonncha/Work/DigitalTwin/CBM/experimental_examples/granite-tsfm", editable = true }
+granite-tsfm = { git = "https://github.com/ibm-granite/granite-tsfm.git", rev = "ttm-r3-release-mq2" }
