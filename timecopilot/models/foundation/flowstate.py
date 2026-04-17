@@ -94,6 +94,13 @@ class FlowState(Forecaster, _DataProcessor):
     @contextmanager
     def _get_model(self) -> FlowStateForPrediction:
         model = FlowStateForPrediction.from_pretrained(self.repo_id).to(self.device)
+        LOGGER.info(
+            "%s loading repo_id=%s device=%s cuda_available=%s",
+            self.alias,
+            self.repo_id,
+            self.device,
+            torch.cuda.is_available(),
+        )
         try:
             model.eval()
             yield model
