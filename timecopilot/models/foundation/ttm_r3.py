@@ -50,6 +50,15 @@ class TTMR3(Forecaster, _DataProcessor):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.dtype = torch.float32
 
+    def _get_effective_context_length(self, model) -> int:
+        context_lengths = [self.context_length]
+        for config_owner in (model, getattr(model, "trend_forecaster", None)):
+            config = getattr(config_owner, "config", None)
+            context_length = getattr(config, "context_length", None)
+            if isinstance(context_length, int) and context_length > 0:
+                context_lengths.append(context_length)
+        return max(context_lengths)
+
     @contextmanager
     def _get_model(self, h: int, freq: str | None):
         get_model = _load_ttm_r3_helpers()
@@ -119,19 +128,20 @@ class TTMR3(Forecaster, _DataProcessor):
         quantiles: list[float] | None,
     ) -> tuple[np.ndarray, np.ndarray | None]:
         context = self._prepare_and_validate_context(batch)
+        effective_context_length = self._get_effective_context_length(model)
         observed_mask = torch.ones_like(context, dtype=torch.bool)
-        if context.shape[1] > self.context_length:
-            context = context[..., -self.context_length :]
-            observed_mask = observed_mask[..., -self.context_length :]
-        elif context.shape[1] < self.context_length:
-            pad = self.context_length - context.shape[1]
+        if context.shape[1] > effective_context_length:
+            context = context[..., -effective_context_length:]
+            observed_mask = observed_mask[..., -effective_context_length:]
+        elif context.shape[1] < effective_context_length:
+            pad = effective_context_length - context.shape[1]
             context = torch.nn.functional.pad(context, (pad, 0), value=0.0)
             observed_mask = torch.nn.functional.pad(observed_mask, (pad, 0), value=False)
             LOGGER.info(
                 "%s zero-padded context from %s to %s",
                 self.alias,
                 context.shape[1] - pad,
-                self.context_length,
+                effective_context_length,
             )
         context = self._maybe_impute_missing(context)
         context = context.unsqueeze(-1).to(self.device)
