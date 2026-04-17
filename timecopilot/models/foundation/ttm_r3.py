@@ -25,6 +25,25 @@ def _load_ttm_r3_helpers():
         ) from exc
 
 
+def _fallback_ttm_r3_revision_for_base_revision(
+    base_revision: str,
+    prediction_length: int,
+    use_lite: bool,
+) -> str | None:
+    def _maybe_lite(revision: str) -> str:
+        return revision.replace("-r3", "-lite-r3") if use_lite else revision
+
+    if base_revision.endswith("-96-r2") or base_revision.endswith("-96-ft-r2"):
+        return _maybe_lite("2048-96-r3")
+    if base_revision.endswith("-720-r2") or base_revision.endswith("-720-ft-r2"):
+        return _maybe_lite("2048-720-r3")
+    if prediction_length <= 96:
+        return _maybe_lite("2048-96-r3")
+    if prediction_length <= 720:
+        return _maybe_lite("2048-720-r3")
+    return None
+
+
 class TTMR3(Forecaster, _DataProcessor):
     """
     TinyTimeMixer R3 wrapper with native quantile output support.
@@ -59,20 +78,9 @@ class TTMR3(Forecaster, _DataProcessor):
                 context_lengths.append(context_length)
         return max(context_lengths)
 
-    @contextmanager
-    def _get_model(self, h: int, freq: str | None):
-        get_model = _load_ttm_r3_helpers()
-        LOGGER.info(
-            "%s loading repo_id=%s revision=%s context_length=%s prediction_length=%s use_lite=%s",
-            self.alias,
-            self.repo_id,
-            self.model_revision or "<auto>",
-            self.context_length,
-            h,
-            self.use_lite,
-        )
+    def _load_model(self, get_model, h: int, freq: str | None):
         try:
-            model = get_model(
+            return get_model(
                 model_path=self.repo_id,
                 model_name="ttm",
                 context_length=self.context_length,
@@ -80,7 +88,7 @@ class TTMR3(Forecaster, _DataProcessor):
                 freq=freq,
                 use_lite=self.use_lite,
                 model_revision=self.model_revision,
-            ).to(self.device)
+            )
         except ValueError as exc:
             if "prediction_filter_length should be positive" in str(exc):
                 revision_msg = (
@@ -96,7 +104,45 @@ class TTMR3(Forecaster, _DataProcessor):
                     "choose a revision whose prediction length is at least the "
                     "requested horizon."
                 ) from exc
+            error_prefix = "Invalid base revision for r3 mapping: "
+            if self.model_revision is None and error_prefix in str(exc):
+                base_revision = str(exc).split(error_prefix, maxsplit=1)[1].strip()
+                fallback_revision = _fallback_ttm_r3_revision_for_base_revision(
+                    base_revision=base_revision,
+                    prediction_length=h,
+                    use_lite=self.use_lite,
+                )
+                if fallback_revision is not None:
+                    LOGGER.warning(
+                        "%s retrying with explicit fallback revision=%s for unsupported base_revision=%s",
+                        self.alias,
+                        fallback_revision,
+                        base_revision,
+                    )
+                    return get_model(
+                        model_path=self.repo_id,
+                        model_name="ttm",
+                        context_length=self.context_length,
+                        prediction_length=h,
+                        freq=freq,
+                        use_lite=self.use_lite,
+                        model_revision=fallback_revision,
+                    )
             raise
+
+    @contextmanager
+    def _get_model(self, h: int, freq: str | None):
+        get_model = _load_ttm_r3_helpers()
+        LOGGER.info(
+            "%s loading repo_id=%s revision=%s context_length=%s prediction_length=%s use_lite=%s",
+            self.alias,
+            self.repo_id,
+            self.model_revision or "<auto>",
+            self.context_length,
+            h,
+            self.use_lite,
+        )
+        model = self._load_model(get_model, h=h, freq=freq).to(self.device)
         if hasattr(model.config, "multi_quantile_head"):
             model.config.multi_quantile_head = True
         if hasattr(model.config, "quantile_list"):
