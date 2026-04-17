@@ -96,6 +96,13 @@ class PatchTSTFM(Forecaster, _DataProcessor):
     @contextmanager
     def _get_model(self) -> PatchTSTFMForPrediction:
         model = PatchTSTFMForPrediction.from_pretrained(self.repo_id).to(self.device)
+        LOGGER.info(
+            "%s loading repo_id=%s device=%s cuda_available=%s",
+            self.alias,
+            self.repo_id,
+            self.device,
+            torch.cuda.is_available(),
+        )
         try:
             model.eval()
             yield model
@@ -118,6 +125,7 @@ class PatchTSTFM(Forecaster, _DataProcessor):
         if context.shape[1] > self.context_length:
             context = context[..., -self.context_length :]
         context = self._maybe_impute_missing(context)
+        context = context.to(self.device)
         # context is (batch, context_length)
 
         # input data is grouped by id
