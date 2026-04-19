@@ -123,12 +123,13 @@ class FlowState(Forecaster, _DataProcessor):
             context = context[..., -self.context_length :]
         context = self._maybe_impute_missing(context)
         context = context.unsqueeze(-1).to(self.device)
-        outputs = model(
-            past_values=context,
-            prediction_length=h,
-            scale_factor=scale_factor,
-            batch_first=True,
-        )
+        with torch.inference_mode():
+            outputs = model(
+                past_values=context,
+                prediction_length=h,
+                scale_factor=scale_factor,
+                batch_first=True,
+            )
         point_fcst = outputs.prediction_outputs
         if point_fcst.ndim == 3 and point_fcst.shape[-1] == 1:
             point_fcst = point_fcst.squeeze(-1)

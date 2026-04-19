@@ -64,7 +64,7 @@ def _build_models(
         ),
         "flowstate": lambda: FlowState(
             context_length=512,
-            batch_size=batch_size,
+            batch_size=32,
         ),
         "patchtst-fm": lambda: PatchTSTFM(
             context_length=batch_size,
