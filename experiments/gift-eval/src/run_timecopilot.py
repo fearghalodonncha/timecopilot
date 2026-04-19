@@ -29,6 +29,7 @@ MODEL_PRESETS = {
     "default": ["chronos", "timesfm", "tirex"],
     "ibm": ["ttm", "flowstate", "patchtst-fm"],
     "ibm-r3": ["ttm-r3", "flowstate", "patchtst-fm"],
+    "ibm-best": ["flowstate", "patchtst-fm"],
 }
 TTM_MAX_PREDICTION_LENGTH = 720
 TTM_FAMILY_MODELS = {"ttm", "ttm-r3"}
