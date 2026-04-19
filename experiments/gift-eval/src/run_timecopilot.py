@@ -3,6 +3,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
 
+import pandas as pd
 import typer
 
 from timecopilot.gift_eval.eval import GIFTEval
@@ -29,6 +30,8 @@ MODEL_PRESETS = {
     "ibm": ["ttm", "flowstate", "patchtst-fm"],
     "ibm-r3": ["ttm-r3", "flowstate", "patchtst-fm"],
 }
+TTM_MAX_PREDICTION_LENGTH = 720
+TTM_FAMILY_MODELS = {"ttm", "ttm-r3"}
 
 
 def _build_models(
@@ -99,6 +102,32 @@ def _run_single_dataset(
             f"Valid presets are {sorted(MODEL_PRESETS)}."
         )
     logging.info("Using models: %s", model_names)
+    logging.info("Prediction length; %s", gifteval.dataset.prediction_length)
+    ttm_family_models = [name for name in model_names if name in TTM_FAMILY_MODELS]
+    if ttm_family_models and gifteval.dataset.prediction_length > TTM_MAX_PREDICTION_LENGTH:
+        if model is not None and set(model).issubset(TTM_FAMILY_MODELS):
+            raise ValueError(
+                "TTM/TTM-R3 does not support this GIFT-Eval horizon in the current Granite "
+                "model-selection path. "
+                f"Requested prediction_length={gifteval.dataset.prediction_length}, "
+                f"but the largest available Granite TTM checkpoint supports "
+                f"prediction_length<={TTM_MAX_PREDICTION_LENGTH}. "
+                "Use another model, or implement rolling/recursive forecasting outside the model."
+            )
+        model_names = [name for name in model_names if name not in TTM_FAMILY_MODELS]
+        logging.warning(
+            "Skipping %s for dataset=%s term=%s because prediction_length=%s exceeds "
+            "the supported maximum of %s for the current Granite TTM selection path.",
+            ttm_family_models,
+            dataset_name,
+            term,
+            gifteval.dataset.prediction_length,
+            TTM_MAX_PREDICTION_LENGTH,
+        )
+        if not model_names:
+            raise ValueError(
+                "After removing unsupported TTM, no models remain to run for this dataset."
+            )
     models = _build_models(model_names, batch_size=batch_size, gift_eval=gifteval)
     forecaster = (
         models[0]
@@ -164,16 +193,49 @@ def run_timecopilot(
     if all_datasets:
         runs = DATASETS_WITH_TERMS[:limit] if limit is not None else DATASETS_WITH_TERMS
         logging.info("Running %s dataset/term combinations", len(runs))
+        failures: list[dict[str, str]] = []
         for dataset_name_i, term_i in runs:
             output_dir = str(Path(output_path) / dataset_name_i / term_i)
-            _run_single_dataset(
-                dataset_name=dataset_name_i,
-                term=term_i,
-                output_path=output_dir,
-                storage_path=storage_path,
-                model_preset=model_preset,
-                model=model,
+            try:
+                _run_single_dataset(
+                    dataset_name=dataset_name_i,
+                    term=term_i,
+                    output_path=output_dir,
+                    storage_path=storage_path,
+                    model_preset=model_preset,
+                    model=model,
+                )
+            except Exception as exc:
+                logging.exception(
+                    "Failed dataset=%s term=%s output=%s",
+                    dataset_name_i,
+                    term_i,
+                    output_dir,
+                )
+                failures.append(
+                    {
+                        "dataset_name": dataset_name_i,
+                        "term": term_i,
+                        "output_path": output_dir,
+                        "model_preset": model_preset,
+                        "models": ",".join(model) if model is not None else ",".join(
+                            MODEL_PRESETS.get(model_preset, [])
+                        ),
+                        "error_type": exc.__class__.__name__,
+                        "error_message": str(exc),
+                    }
+                )
+        if failures:
+            failures_path = Path(output_path) / "failures.csv"
+            failures_path.parent.mkdir(parents=True, exist_ok=True)
+            pd.DataFrame(failures).to_csv(failures_path, index=False)
+            logging.warning(
+                "Completed with %s failed dataset/term combinations. Failure summary written to %s",
+                len(failures),
+                failures_path,
             )
+        else:
+            logging.info("Completed all dataset/term combinations successfully.")
         return
 
     if dataset_name is None or term is None:
