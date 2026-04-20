@@ -1,5 +1,6 @@
 import os
 from contextlib import contextmanager
+import logging
 
 import numpy as np
 import pandas as pd
@@ -13,6 +14,8 @@ from tqdm import tqdm
 
 from ..utils.forecaster import Forecaster, QuantileConverter
 from .utils import TimeSeriesDataset, flatten_forecast_values
+
+LOGGER = logging.getLogger(__name__)
 
 
 class _TimesFMV1(Forecaster):
@@ -136,40 +139,61 @@ class _TimesFMV2_p5(Forecaster):
         self.batch_size = batch_size
         self.alias = alias
         self.kwargs = kwargs
+        self._predictor: TimesFM_2p5_200M_torch | None = None
+        self._compiled_max_horizon: int | None = None
 
     @contextmanager
     def _get_predictor(
         self,
         prediction_length: int,
     ) -> TimesFM_2p5_200M_torch:
-        # automatically detect the best device
-        # https://github.com/TimeCopilot/timesfm/blob/b810bbdf9f8a1e66396e7bd5cdb3b005e9116d86/src/timesfm/timesfm_2p5/timesfm_2p5_torch.py#L71
-        if os.path.exists(self.repo_id):
-            path = os.path.join(self.repo_id, "model.safetensors")
-            tfm = TimesFM_2p5_200M_torch().model.load_checkpoint(path)
-        elif repo_exists(self.repo_id):
-            tfm = TimesFM_2p5_200M_torch.from_pretrained(self.repo_id)
-        else:
-            raise OSError(
-                f"Failed to load model. Searched for '{self.repo_id}' "
-                "as a local path to model directory and as a Hugging Face repo_id."
+        if self._predictor is None:
+            # automatically detect the best device
+            # https://github.com/TimeCopilot/timesfm/blob/b810bbdf9f8a1e66396e7bd5cdb3b005e9116d86/src/timesfm/timesfm_2p5/timesfm_2p5_torch.py#L71
+            if os.path.exists(self.repo_id):
+                path = os.path.join(self.repo_id, "model.safetensors")
+                self._predictor = TimesFM_2p5_200M_torch().model.load_checkpoint(path)
+            elif repo_exists(self.repo_id):
+                self._predictor = TimesFM_2p5_200M_torch.from_pretrained(self.repo_id)
+            else:
+                raise OSError(
+                    f"Failed to load model. Searched for '{self.repo_id}' "
+                    "as a local path to model directory and as a Hugging Face repo_id."
+                )
+            LOGGER.info("%s loaded repo_id=%s", self.alias, self.repo_id)
+
+        if self._compiled_max_horizon is None or prediction_length > self._compiled_max_horizon:
+            default_kwargs = {
+                "max_context": self.context_length,
+                "max_horizon": prediction_length,
+                "normalize_inputs": True,
+                "use_continuous_quantile_head": True,
+                "fix_quantile_crossing": True,
+            }
+            passed_kwargs = self.kwargs or {}
+            kwargs = {**default_kwargs, **passed_kwargs}
+            config = timesfm.ForecastConfig(**kwargs)
+            self._predictor.compile(config)
+            self._compiled_max_horizon = prediction_length
+            LOGGER.info(
+                "%s compiled predictor repo_id=%s max_context=%s max_horizon=%s",
+                self.alias,
+                self.repo_id,
+                self.context_length,
+                prediction_length,
             )
-        default_kwargs = {
-            "max_context": self.context_length,
-            "max_horizon": prediction_length,
-            "normalize_inputs": True,
-            "use_continuous_quantile_head": True,
-            "fix_quantile_crossing": True,
-        }
-        passed_kwargs = self.kwargs or {}
-        kwargs = {**default_kwargs, **passed_kwargs}
-        config = timesfm.ForecastConfig(**kwargs)
-        tfm.compile(config)
+        else:
+            LOGGER.info(
+                "%s reusing compiled predictor repo_id=%s cached_max_horizon=%s requested_h=%s",
+                self.alias,
+                self.repo_id,
+                self._compiled_max_horizon,
+                prediction_length,
+            )
         try:
-            yield tfm
+            yield self._predictor
         finally:
-            del tfm
-            torch.cuda.empty_cache()
+            pass
 
     def _predict(
         self,
