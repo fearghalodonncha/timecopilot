@@ -1,6 +1,7 @@
 import os
 import sys
 from contextlib import contextmanager
+import logging
 
 if sys.version_info < (3, 11):
     raise ImportError("TiRex requires Python >= 3.11")
@@ -14,6 +15,8 @@ from tqdm import tqdm
 
 from ..utils.forecaster import Forecaster, QuantileConverter
 from .utils import TimeSeriesDataset, flatten_forecast_values
+
+LOGGER = logging.getLogger(__name__)
 
 
 class TiRex(Forecaster):
@@ -71,12 +74,25 @@ class TiRex(Forecaster):
         if device == "cpu":
             # see https://github.com/NX-AI/tirex/tree/main?tab=readme-ov-file#cuda-kernels
             os.environ["TIREX_NO_CUDA"] = "1"
-        model = load_model(self.repo_id, device=device)
+        try:
+            model = load_model(self.repo_id, device=device)
+        except RuntimeError as exc:
+            if "Error building extension" not in str(exc):
+                raise
+            LOGGER.warning(
+                "%s failed to build TiRex sLSTM CUDA extension on device=%s; "
+                "retrying with TIREX_NO_CUDA=1 using the vanilla backend.",
+                self.alias,
+                device,
+            )
+            os.environ["TIREX_NO_CUDA"] = "1"
+            model = load_model(self.repo_id, device=device)
         try:
             yield model
         finally:
             del model
-            torch.cuda.empty_cache()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
     def _forecast(
         self,
