@@ -87,8 +87,18 @@ def _run_single_dataset(
     storage_path: str,
     model_preset: str,
     model: list[str] | None,
+    skip_completed: bool,
 ) -> None:
     logging.info("Running dataset=%s term=%s output=%s", dataset_name, term, output_path)
+    output_csv = Path(output_path) / "all_results.csv"
+    if skip_completed and output_csv.exists():
+        logging.info(
+            "Skipping completed dataset=%s term=%s because %s already exists",
+            dataset_name,
+            term,
+            output_csv,
+        )
+        return
     batch_size = 512
     gifteval = GIFTEval(
         dataset_name=dataset_name,
@@ -190,6 +200,13 @@ def run_timecopilot(
             help="Optional limit on the number of dataset/term combinations to run.",
         ),
     ] = None,
+    skip_completed: Annotated[
+        bool,
+        typer.Option(
+            "--skip-completed",
+            help="Skip dataset/term outputs whose all_results.csv already exists.",
+        ),
+    ] = False,
 ):
     if all_datasets:
         runs = DATASETS_WITH_TERMS[:limit] if limit is not None else DATASETS_WITH_TERMS
@@ -205,6 +222,7 @@ def run_timecopilot(
                     storage_path=storage_path,
                     model_preset=model_preset,
                     model=model,
+                    skip_completed=skip_completed,
                 )
             except Exception as exc:
                 logging.exception(
@@ -251,6 +269,7 @@ def run_timecopilot(
         storage_path=storage_path,
         model_preset=model_preset,
         model=model,
+        skip_completed=skip_completed,
     )
 
 
