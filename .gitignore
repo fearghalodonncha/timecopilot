@@ -166,3 +166,14 @@ cython_debug/
 
 # logs
 lightning_logs/
+
+# GIFT-Eval generated outputs
+experiments/gift-eval/results/
+
+# If you want to keep the folder structure but not contents:
+# !experiments/gift-eval/results/.gitkeep
+
+# HPC / local run logs
+experiments/gift-eval/results/
+experiments/gift-eval/logs/
+logs/

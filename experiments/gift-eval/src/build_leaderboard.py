@@ -79,10 +79,14 @@ def _prepare_leaderboard(
     )
     if datasets is None:
         local_datasets = set(local_df["dataset"].unique().tolist())
-        benchmark_datasets = set(benchmark_df["dataset"].unique().tolist())
+        benchmark_datasets = (
+            set(benchmark_df["dataset"].unique().tolist())
+            if not benchmark_df.empty and "dataset" in benchmark_df.columns
+            else set()
+        )
         datasets = sorted(
             local_datasets.intersection(benchmark_datasets)
-            if not benchmark_df.empty
+            if benchmark_datasets
             else local_datasets
         )
     combined = combined[combined["dataset"].isin(datasets)].copy()
