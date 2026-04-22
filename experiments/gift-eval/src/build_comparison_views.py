@@ -15,6 +15,20 @@ def _extract_term(dataset_config: str) -> str:
     return dataset_config.rsplit("/", maxsplit=1)[-1]
 
 
+def _deduplicate_per_dataset(per_dataset: pd.DataFrame) -> pd.DataFrame:
+    return per_dataset.drop_duplicates(subset=["dataset", "run_name"], keep="first").copy()
+
+
+def _filter_to_common_datasets(per_dataset: pd.DataFrame) -> pd.DataFrame:
+    common_datasets = None
+    for run_name, group in per_dataset.groupby("run_name"):
+        datasets = set(group["dataset"].unique().tolist())
+        common_datasets = datasets if common_datasets is None else common_datasets.intersection(datasets)
+    if common_datasets is None:
+        return per_dataset.copy()
+    return per_dataset[per_dataset["dataset"].isin(common_datasets)].copy()
+
+
 def _build_rank_table(
     per_dataset: pd.DataFrame,
     metric: str,
@@ -152,6 +166,10 @@ def build_comparison_views(
         Path | None,
         typer.Option(help="Optional output directory. Defaults to the leaderboard directory."),
     ] = None,
+    run_name: Annotated[
+        list[str] | None,
+        typer.Option(help="Optional repeated run-name filter for a clean comparison set."),
+    ] = None,
     primary_metric: Annotated[
         str,
         typer.Option(help="Primary metric for fair ranking views."),
@@ -165,16 +183,21 @@ def build_comparison_views(
     per_dataset_path = leaderboard_dir / "leaderboard_per_dataset.csv"
     leaderboard_summary = pd.read_csv(summary_path)
     per_dataset = pd.read_csv(per_dataset_path)
+    if run_name:
+        leaderboard_summary = leaderboard_summary[leaderboard_summary["run_name"].isin(run_name)].copy()
+        per_dataset = per_dataset[per_dataset["run_name"].isin(run_name)].copy()
+    per_dataset = _deduplicate_per_dataset(per_dataset)
+    fair_per_dataset = _filter_to_common_datasets(per_dataset)
 
     out_dir = output_dir or leaderboard_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    ranked_primary = _build_rank_table(per_dataset, primary_metric)
-    ranked_secondary = _build_rank_table(per_dataset, secondary_metric)
+    ranked_primary = _build_rank_table(fair_per_dataset, primary_metric)
+    ranked_secondary = _build_rank_table(fair_per_dataset, secondary_metric)
 
     win_counts = _build_win_counts(ranked_primary, primary_metric)
     rank_by_term = _build_rank_by_term(ranked_primary, primary_metric)
-    primary_metric_by_term = _build_metric_by_term(per_dataset, primary_metric)
+    primary_metric_by_term = _build_metric_by_term(fair_per_dataset, primary_metric)
     appendix = _build_appendix(
         ranked_primary=ranked_primary,
         ranked_secondary=ranked_secondary,

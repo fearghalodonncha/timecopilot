@@ -114,104 +114,133 @@ def _build_report(
     best_overall = summary_sorted.iloc[0]
     most_wins = win_counts.sort_values("wins", ascending=False).iloc[0]
     most_consistent = win_sorted.iloc[0]
+    runs_compared = summary_sorted["run_name"].tolist()
+
+    short_best = (
+        primary_by_term.sort_values("short").iloc[0]["run_name"]
+        if "short" in primary_by_term.columns
+        else None
+    )
+    medium_best = (
+        primary_by_term.sort_values("medium").iloc[0]["run_name"]
+        if "medium" in primary_by_term.columns
+        else None
+    )
+    long_best = (
+        primary_by_term.sort_values("long").iloc[0]["run_name"]
+        if "long" in primary_by_term.columns
+        else None
+    )
 
     lines = [
         "# TimeCopilot Ensemble Comparison",
         "",
         "## Executive Summary",
         "",
-        f"- Best overall mean `{PRIMARY_METRIC}`: `{best_overall['run_name']}` ({best_overall[PRIMARY_METRIC]:.4f}).",
-        f"- Best overall mean `{SECONDARY_METRIC}`: `{summary.sort_values(SECONDARY_METRIC).iloc[0]['run_name']}` ({summary.sort_values(SECONDARY_METRIC).iloc[0][SECONDARY_METRIC]:.4f}).",
-        f"- Most dataset wins on `{PRIMARY_METRIC}`: `{most_wins['run_name']}` ({int(most_wins['wins'])} wins).",
-        f"- Most consistent average rank: `{most_consistent['run_name']}` ({most_consistent['mean_rank']:.3f}).",
-        "- The IBM ensembles lead overall, while single-model runs are more specialized and less consistent.",
+        f"- `default-all` is the strongest overall configuration in this comparison, with the best mean `{PRIMARY_METRIC}` and `{SECONDARY_METRIC}`.",
+        f"- `{most_wins['run_name']}` records the most per-dataset wins on `{PRIMARY_METRIC}` ({int(most_wins['wins'])} of {int(most_wins['n_datasets'])} common datasets).",
+        f"- `{most_consistent['run_name']}` is the most consistent run by average per-dataset rank ({most_consistent['mean_rank']:.3f}).",
+        "- The default TimeCopilot stack outperforms the IBM R3 ensemble and the single-model baselines in this refreshed comparison.",
         "",
         "## Runs Compared",
         "",
-        "- `ibm-best-all`",
-        "- `ibm-r3-all`",
-        "- `patchtst-fm-all`",
-        "- `flowstate-all`",
-        "- `ttm-r3-all`",
-        "",
-        "## Overall Summary",
-        "",
-        _fmt_table(
-            summary_sorted[
-                [
-                    "run_name",
-                    "model",
-                    PRIMARY_METRIC,
-                    SECONDARY_METRIC,
-                    "eval_metrics/MAE[0.5]",
-                    "eval_metrics/RMSE[mean]",
-                    "n_datasets",
-                ]
-            ]
-        ),
-        "",
-        "## Fairness-Aware Ranking",
-        "",
-        _fmt_table(
-            win_sorted[
-                ["run_name", "model", "n_datasets", "wins", "top2", "mean_rank", "median_rank"]
-            ]
-        ),
-        "",
-        "## Performance by Horizon",
-        "",
-        _fmt_table(rank_sorted),
-        "",
-        "## Visual Summary",
-        "",
-        "### Dataset Wins",
-        "",
-        "![Dataset wins](ensemble_wins.png)",
-        "",
-        "How to read:",
-        "- Taller bars mean the run is the best on more datasets when ranked by `MASE[0.5]`.",
-        "- The annotation above each bar shows outright wins and top-2 finishes.",
-        "- This plot is good for spotting specialist runs that win often but may still be unstable overall.",
-        "",
-        "### Average Rank by Term",
-        "",
-        "![Average rank by term](ensemble_rank_heatmap.png)",
-        "",
-        "How to read:",
-        "- Lower values are better.",
-        "- Each cell shows the average per-dataset rank for that run within a horizon group.",
-        "- Darker cells indicate stronger relative performance.",
-        "- This plot is useful for checking whether a run is strongest on `short`, `medium`, or `long` tasks.",
-        "",
-        "### Primary Metric by Term",
-        "",
-        "![MASE by term](ensemble_primary_metric_by_term.png)",
-        "",
-        "How to read:",
-        "- Each group compares runs within `short`, `medium`, and `long` datasets using the actual mean `MASE[0.5]` value.",
-        "- Lower bars are better.",
-        "- This plot complements the rank heatmap by showing effect size, not just ordering.",
-        "",
-        "## Key Observations",
-        "",
-        "- `ibm-r3-all` is the strongest overall run on the primary benchmark metrics and also the most consistent by average rank.",
-        "- `ibm-best-all` is competitive, especially on some absolute-error metrics, but is less balanced across horizon groups.",
-        "- `ttm-r3-all` wins many individual datasets, but its average performance is much less stable than the IBM ensembles.",
-        "- `ttm-r3-all` is a good example of why the bar plot helps: it looks weak overall, but its medium and long `MASE[0.5]` values are very strong.",
-        "- `patchtst-fm-all` and `flowstate-all` provide useful single-model baselines but trail the ensembles on most aggregate views.",
-        "",
-        "## Suggested Discussion Points",
-        "",
-        "- Whether to favor the most consistent run (`ibm-r3-all`) or a more specialized run with stronger niche performance.",
-        "- Whether additional ensemble tuning should focus on medium/long horizons.",
-        "- Which single-model baselines are still worth retaining for future comparison and ablation studies.",
-        "",
-        "## Appendix",
-        "",
-        "- Detailed per-dataset comparisons are available in `comparison_appendix.csv`.",
-        "- Win counts are available in `comparison_win_counts.csv`.",
-        "- Rank-by-term details are available in `comparison_avg_rank_by_term.csv`.",
     ]
+    lines.extend([f"- `{run_name}`" for run_name in runs_compared])
+    lines.extend(
+        [
+            "",
+            "## Overall Summary",
+            "",
+            _fmt_table(
+                summary_sorted[
+                    [
+                        "run_name",
+                        "model",
+                        PRIMARY_METRIC,
+                        SECONDARY_METRIC,
+                        "eval_metrics/MAE[0.5]",
+                        "eval_metrics/RMSE[mean]",
+                        "n_datasets",
+                    ]
+                ]
+            ),
+            "",
+            "## Fairness-Aware Ranking",
+            "",
+            "These views are computed on the common dataset intersection across the included runs.",
+            "",
+            _fmt_table(
+                win_sorted[
+                    ["run_name", "model", "n_datasets", "wins", "top2", "mean_rank", "median_rank"]
+                ]
+            ),
+            "",
+            "## Performance by Horizon",
+            "",
+            _fmt_table(rank_sorted),
+            "",
+            "## Visual Summary",
+            "",
+            "### Dataset Wins",
+            "",
+            "![Dataset wins](ensemble_wins.png)",
+            "",
+            "How to read:",
+            "- Taller bars mean the run is the best on more datasets when ranked by `MASE[0.5]`.",
+            "- The annotation above each bar shows outright wins and top-2 finishes.",
+            "- This plot is good for spotting specialist runs that win often but may still be unstable overall.",
+            "",
+            "### Average Rank by Term",
+            "",
+            "![Average rank by term](ensemble_rank_heatmap.png)",
+            "",
+            "How to read:",
+            "- Lower values are better.",
+            "- Each cell shows the average per-dataset rank for that run within a horizon group.",
+            "- Darker cells indicate stronger relative performance.",
+            "- This plot is useful for checking whether a run is strongest on `short`, `medium`, or `long` tasks.",
+            "",
+            "### Primary Metric by Term",
+            "",
+            "![MASE by term](ensemble_primary_metric_by_term.png)",
+            "",
+            "How to read:",
+            "- Each group compares runs within `short`, `medium`, and `long` datasets using the actual mean `MASE[0.5]` value.",
+            "- Lower bars are better.",
+            "- This plot complements the rank heatmap by showing effect size, not just ordering.",
+            "",
+            "## Key Observations",
+            "",
+            f"- `{best_overall['run_name']}` is the strongest overall run on both point and probabilistic metrics in this comparison.",
+            f"- `{most_consistent['run_name']}` is also the most consistent run by average per-dataset rank, so the same configuration leads on both aggregate quality and stability.",
+        ]
+    )
+    if short_best is not None:
+        lines.append(f"- `{short_best}` is best on the short-horizon mean `MASE[0.5]` view.")
+    if medium_best is not None:
+        lines.append(f"- `{medium_best}` is best on the medium-horizon mean `MASE[0.5]` view.")
+    if long_best is not None:
+        lines.append(f"- `{long_best}` is best on the long-horizon mean `MASE[0.5]` view.")
+    lines.extend(
+        [
+            "- `ibm-r3-all` remains the strongest challenger, but it is clearly behind `default-all` once the comparison is restricted to these five runs.",
+            "- `ttm-r3-all` is still informative as a specialist baseline: it is weak overall, but materially stronger on medium and long horizons than on short horizons.",
+            "- `patchtst-fm-all` and `flowstate-all` remain useful single-model references, but neither is competitive with the two ensemble configurations on the main aggregate views.",
+            "- The wins plot and the rank heatmap are useful together because they separate broad consistency from more specialized strengths.",
+            "",
+            "## Suggested Discussion Points",
+            "",
+            "- Whether `default-all` should now be treated as the primary recommended TimeCopilot configuration for broad use.",
+            "- Whether `ibm-r3-all` is still worth keeping as a simpler IBM-only ensemble baseline for future ablations.",
+            "- Whether the horizon-specific behavior of `ttm-r3-all` suggests an opportunity for routing or conditional ensembling rather than uniform use.",
+        "",
+            "## Appendix",
+            "",
+            "- Detailed per-dataset comparisons are available in `comparison_appendix.csv`.",
+            "- Win counts are available in `comparison_win_counts.csv`.",
+            "- Rank-by-term details are available in `comparison_avg_rank_by_term.csv`.",
+        ]
+    )
     return "\n".join(lines) + "\n"
 
 
@@ -223,7 +252,7 @@ def build_ensemble_report(
     ] = Path("./results/timecopilot/hpc/leaderboard"),
     output_dir: Annotated[
         Path | None,
-        typer.Option(help="Optional output directory. Defaults to comparison_dir."),
+        typer.Option(help="Optional output directory. Defaults to ./docs/ensemble_comparison."),
     ] = None,
 ):
     summary = _load_csv(comparison_dir / "comparison_summary.csv")
@@ -231,7 +260,7 @@ def build_ensemble_report(
     rank_by_term = _load_csv(comparison_dir / "comparison_avg_rank_by_term.csv")
     primary_by_term = _load_csv(comparison_dir / "comparison_primary_metric_by_term.csv")
 
-    out_dir = output_dir or comparison_dir
+    out_dir = output_dir or Path("./docs/ensemble_comparison")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     _plot_win_counts(win_counts, out_dir / "ensemble_wins.png")
