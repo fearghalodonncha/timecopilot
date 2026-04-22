@@ -9,11 +9,11 @@
 
 ## Runs Compared
 
-- `default-all`
-- `ibm-r3-all`
-- `flowstate-all`
-- `patchtst-fm-all`
-- `ttm-r3-all`
+- `default-all` - Default selection of Chronos, Timesfm, and Tirex
+- `ibm-r3-all` - IBM model ensemble, Patchtst-FM, Flowstate, and TTM (using the R3 version of TTM from `ttm-r3-release-mq2` branch)
+- `flowstate-all` - Flowstate run using Timecopilot
+- `patchtst-fm-all` - Patchttst run using Timecopilot
+- `ttm-r3-all` - TTM run using Timecopilot
 
 ## Overall Summary
 
