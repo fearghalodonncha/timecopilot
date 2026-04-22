@@ -1,0 +1,6 @@
+run_name,model,n_datasets,wins,top2,mean_rank,median_rank
+default-all,TimeCopilot,95,68,83,1.4421052631578948,1.0
+ibm-r3-all,TimeCopilot-IBM,95,7,44,2.526315789473684,3.0
+ttm-r3-all,TTM-R3,95,9,35,3.4210526315789473,4.0
+patchtst-fm-all,PatchTST-FM,95,6,15,3.7263157894736842,4.0
+flowstate-all,FlowState,95,5,13,3.8842105263157896,4.0

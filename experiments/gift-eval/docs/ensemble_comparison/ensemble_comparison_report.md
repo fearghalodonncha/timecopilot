@@ -2,49 +2,50 @@
 
 ## Executive Summary
 
-- Best overall mean `eval_metrics/MASE[0.5]`: `ibm-r3-all` (1.5500).
-- Best overall mean `eval_metrics/mean_weighted_sum_quantile_loss`: `ibm-r3-all` (0.2144).
-- Most dataset wins on `eval_metrics/MASE[0.5]`: `ttm-r3-all` (37 wins).
-- Most consistent average rank: `ibm-r3-all` (2.000).
-- The IBM ensembles lead overall, while single-model runs are more specialized and less consistent.
+- `default-all` is the strongest overall configuration in this comparison, with the best mean `eval_metrics/MASE[0.5]` and `eval_metrics/mean_weighted_sum_quantile_loss`.
+- `default-all` records the most per-dataset wins on `eval_metrics/MASE[0.5]` (68 of 95 common datasets).
+- `default-all` is the most consistent run by average per-dataset rank (1.442).
+- The default TimeCopilot stack outperforms the IBM R3 ensemble and the single-model baselines in this refreshed comparison.
 
 ## Runs Compared
 
-- `ibm-best-all`
+- `default-all`
 - `ibm-r3-all`
-- `patchtst-fm-all`
 - `flowstate-all`
+- `patchtst-fm-all`
 - `ttm-r3-all`
 
 ## Overall Summary
 
 | run_name        | model           |   eval_metrics/MASE[0.5] |   eval_metrics/mean_weighted_sum_quantile_loss |   eval_metrics/MAE[0.5] |   eval_metrics/RMSE[mean] |   n_datasets |
 |:----------------|:----------------|-------------------------:|-----------------------------------------------:|------------------------:|--------------------------:|-------------:|
+| default-all     | TimeCopilot     |                  1.47612 |                                       0.202318 |                 538.513 |                   3101.67 |           97 |
 | ibm-r3-all      | TimeCopilot-IBM |                  1.54998 |                                       0.214378 |                 549.015 |                   2974.68 |           97 |
-| ibm-best-all    | TimeCopilot-IBM |                  1.60677 |                                       0.223634 |                 506.304 |                   2766.33 |           97 |
 | flowstate-all   | FlowState       |                  1.64117 |                                       0.232145 |                 516.287 |                   2756.45 |           97 |
 | patchtst-fm-all | PatchTST-FM     |                  1.67304 |                                       0.228007 |                 548.509 |                   3135.61 |           97 |
-| ttm-r3-all      | TTM-R3          |                  1.98854 |                                       0.303424 |                1229.12  |                   8586.04 |           95 |
+| ttm-r3-all      | TTM-R3          |                  2.02548 |                                       0.308846 |                1216.53  |                   8685.45 |           95 |
 
 ## Fairness-Aware Ranking
 
+These views are computed on the common dataset intersection across the included runs.
+
 | run_name        | model           |   n_datasets |   wins |   top2 |   mean_rank |   median_rank |
 |:----------------|:----------------|-------------:|-------:|-------:|------------:|--------------:|
-| ibm-r3-all      | TimeCopilot-IBM |           97 |     26 |     74 |     2       |             2 |
-| ibm-best-all    | TimeCopilot-IBM |           97 |     20 |     45 |     2.53608 |             3 |
-| ttm-r3-all      | TTM-R3          |           95 |     37 |     45 |     3.0101  |             4 |
-| patchtst-fm-all | PatchTST-FM     |           97 |     10 |     20 |     3.56701 |             4 |
-| flowstate-all   | FlowState       |           97 |      8 |     16 |     3.72165 |             4 |
+| default-all     | TimeCopilot     |           95 |     68 |     83 |     1.44211 |             1 |
+| ibm-r3-all      | TimeCopilot-IBM |           95 |      7 |     44 |     2.52632 |             3 |
+| ttm-r3-all      | TTM-R3          |           95 |      9 |     35 |     3.42105 |             4 |
+| patchtst-fm-all | PatchTST-FM     |           95 |      6 |     15 |     3.72632 |             4 |
+| flowstate-all   | FlowState       |           95 |      5 |     13 |     3.88421 |             4 |
 
 ## Performance by Horizon
 
 | run_name        | model           |   short |   medium |    long |   overall_mean_rank |
 |:----------------|:----------------|--------:|---------:|--------:|--------------------:|
-| ibm-r3-all      | TimeCopilot-IBM | 2.21818 |  1.7619  | 1.66667 |             2       |
-| ibm-best-all    | TimeCopilot-IBM | 2.14545 |  3.2381  | 2.85714 |             2.53608 |
-| ttm-r3-all      | TTM-R3          | 3.89286 |  1.69565 | 2.05    |             3.0101  |
-| patchtst-fm-all | PatchTST-FM     | 3.25455 |  4.14286 | 3.80952 |             3.56701 |
-| flowstate-all   | FlowState       | 3.43636 |  4.09524 | 4.09524 |             3.72165 |
+| default-all     | TimeCopilot     | 1.47273 |  1.38095 | 1.42105 |             1.44211 |
+| ibm-r3-all      | TimeCopilot-IBM | 2.52727 |  2.61905 | 2.42105 |             2.52632 |
+| ttm-r3-all      | TTM-R3          | 4.12727 |  2.33333 | 2.57895 |             3.42105 |
+| patchtst-fm-all | PatchTST-FM     | 3.38182 |  4.33333 | 4.05263 |             3.72632 |
+| flowstate-all   | FlowState       | 3.49091 |  4.33333 | 4.52632 |             3.88421 |
 
 ## Visual Summary
 
@@ -78,17 +79,21 @@ How to read:
 
 ## Key Observations
 
-- `ibm-r3-all` is the strongest overall run on the primary benchmark metrics and also the most consistent by average rank.
-- `ibm-best-all` is competitive, especially on some absolute-error metrics, but is less balanced across horizon groups.
-- `ttm-r3-all` wins many individual datasets, but its average performance is much less stable than the IBM ensembles.
-- `ttm-r3-all` is a good example of why the bar plot helps: it looks weak overall, but its medium and long `MASE[0.5]` values are very strong.
-- `patchtst-fm-all` and `flowstate-all` provide useful single-model baselines but trail the ensembles on most aggregate views.
+- `default-all` is the strongest overall run on both point and probabilistic metrics in this comparison.
+- `default-all` is also the most consistent run by average per-dataset rank, so the same configuration leads on both aggregate quality and stability.
+- `ibm-r3-all` is best on the short-horizon mean `MASE[0.5]` view.
+- `default-all` is best on the medium-horizon mean `MASE[0.5]` view.
+- `default-all` is best on the long-horizon mean `MASE[0.5]` view.
+- `ibm-r3-all` remains the strongest challenger, but it is clearly behind `default-all` once the comparison is restricted to these five runs.
+- `ttm-r3-all` is still informative as a specialist baseline: it is weak overall, but materially stronger on medium and long horizons than on short horizons.
+- `patchtst-fm-all` and `flowstate-all` remain useful single-model references, but neither is competitive with the two ensemble configurations on the main aggregate views.
+- The wins plot and the rank heatmap are useful together because they separate broad consistency from more specialized strengths.
 
 ## Suggested Discussion Points
 
-- Whether to favor the most consistent run (`ibm-r3-all`) or a more specialized run with stronger niche performance.
-- Whether additional ensemble tuning should focus on medium/long horizons.
-- Which single-model baselines are still worth retaining for future comparison and ablation studies.
+- Whether `default-all` should now be treated as the primary recommended TimeCopilot configuration for broad use.
+- Whether `ibm-r3-all` is still worth keeping as a simpler IBM-only ensemble baseline for future ablations.
+- Whether the horizon-specific behavior of `ttm-r3-all` suggests an opportunity for routing or conditional ensembling rather than uniform use.
 
 ## Appendix
 

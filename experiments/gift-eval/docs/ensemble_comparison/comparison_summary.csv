@@ -1,0 +1,6 @@
+run_name,model,eval_metrics/MASE[0.5],eval_metrics/mean_weighted_sum_quantile_loss,eval_metrics/MAE[0.5],eval_metrics/RMSE[mean],n_datasets,eval_metrics/MASE[0.5]_rank,eval_metrics/mean_weighted_sum_quantile_loss_rank,eval_metrics/MAE[0.5]_rank,eval_metrics/RMSE[mean]_rank
+default-all,TimeCopilot,1.4761215892509836,0.2023182052337729,538.5129871260696,3101.672719732216,97,1.0,1.0,2.0,3.0
+ibm-r3-all,TimeCopilot-IBM,1.5499816613224515,0.2143777874850847,549.0146281031581,2974.677839098959,97,2.0,2.0,4.0,2.0
+flowstate-all,FlowState,1.6411687467592726,0.2321448893629047,516.2867279678106,2756.4484376575633,97,3.0,4.0,1.0,1.0
+patchtst-fm-all,PatchTST-FM,1.6730383377351026,0.2280073170702188,548.5088823851797,3135.6121893859445,97,4.0,3.0,3.0,4.0
+ttm-r3-all,TTM-R3,2.02547867954393,0.3088462356044953,1216.5313495456026,8685.445650883239,95,5.0,5.0,5.0,5.0
