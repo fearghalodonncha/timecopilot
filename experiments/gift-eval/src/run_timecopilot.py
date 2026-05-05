@@ -64,8 +64,13 @@ def _build_models(
             batch_size=batch_size,
         ),
         "flowstate": lambda: FlowState(
-            context_length=512,
-            batch_size=32,
+            repo_id="ibm-research/FlowState",
+            revision="r1.1",
+            context_length=None,
+            batch_size=16,
+            domain=gift_eval.dataset_properties_map[gift_eval.ds_key]["domain"],
+            no_daily="l2c" in gift_eval.dataset_name,
+            gift_eval_compat=True,
         ),
         "patchtst-fm": lambda: PatchTSTFM(
             context_length=batch_size,
@@ -148,9 +153,11 @@ def _run_single_dataset(
             alias="TimeCopilot" if model_preset == "default" else "TimeCopilot-IBM",
         )
     )
+    flowstate_only = model_names == ["flowstate"]
     predictor = GluonTSPredictor(
         forecaster=forecaster,
-        max_length=4_096,
+        max_length=None if flowstate_only else 4_096,
+        impute_missing_values=not flowstate_only,
         batch_size=1_024,
     )
     gifteval.evaluate_predictor(predictor, batch_size=512)

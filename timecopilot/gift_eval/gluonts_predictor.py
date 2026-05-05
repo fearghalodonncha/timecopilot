@@ -32,6 +32,7 @@ class GluonTSPredictor(RepresentablePredictor):
         quantiles: list[float] | None = None,
         max_length: int | None = None,
         imputation_method: MissingValueImputation | None = None,
+        impute_missing_values: bool = True,
         batch_size: int | None = 1024,
     ):
         """
@@ -53,6 +54,8 @@ class GluonTSPredictor(RepresentablePredictor):
             imputation_method (MissingValueImputation | None): Imputation method for
                 missing values. If None (default), the last value is used
                 with LastValueImputation().
+            impute_missing_values (bool): Whether to impute missing values before
+                passing the data to the wrapped forecaster.
             batch_size (int | None): Batch size for prediction.
 
         Raises:
@@ -67,6 +70,7 @@ class GluonTSPredictor(RepresentablePredictor):
         self.quantiles = quantiles or QUANTILE_LEVELS
         self.max_length = max_length
         self.imputation_method = imputation_method or LastValueImputation()
+        self.impute_missing_values = impute_missing_values
         self.batch_size = batch_size
         self.alias = forecaster.alias
 
@@ -81,7 +85,7 @@ class GluonTSPredictor(RepresentablePredictor):
             if self.max_length is not None and len(target) > self.max_length:
                 entry["start"] += len(target[: -self.max_length])
                 target = target[-self.max_length :]
-            if np.isnan(target).any():
+            if self.impute_missing_values and np.isnan(target).any():
                 target = self.imputation_method(target)
             if target.ndim > 1:
                 raise ValueError("only for univariate time series")
