@@ -177,7 +177,9 @@ def _run_single_dataset(
             alias="TimeCopilot" if model_preset == "default" else "TimeCopilot-IBM",
         )
     )
-    direct_gift_eval_model = model_names in (["flowstate"], ["patchtst-fm"], ["ttm-r3"])
+    direct_gift_eval_model = all(
+        name in {"flowstate", "patchtst-fm", "ttm-r3"} for name in model_names
+    )
     predictor = GluonTSPredictor(
         forecaster=forecaster,
         max_length=None if direct_gift_eval_model else 4_096,

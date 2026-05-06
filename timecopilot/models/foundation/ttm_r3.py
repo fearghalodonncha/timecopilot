@@ -134,13 +134,14 @@ class TTMR3(Forecaster, _DataProcessor):
         self.dtype = torch.float32
 
     def _get_effective_context_length(self, model) -> int:
-        context_lengths = [self.context_length] if self.context_length is not None else []
         for config_owner in (model, getattr(model, "trend_forecaster", None)):
             config = getattr(config_owner, "config", None)
             context_length = getattr(config, "context_length", None)
             if isinstance(context_length, int) and context_length > 0:
-                context_lengths.append(context_length)
-        return max(context_lengths)
+                return context_length
+        if self.context_length is None:
+            raise ValueError(f"{self.alias} could not determine an effective context length.")
+        return self.context_length
 
     def _public_gift_model_kwargs(
         self,
