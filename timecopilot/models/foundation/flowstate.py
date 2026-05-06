@@ -29,10 +29,15 @@ class FlowState(Forecaster, _DataProcessor):
     def __init__(
         self,
         repo_id: str = "ibm-research/flowstate",
+        revision: str | None = None,
         scale_factor: float | None = None,
-        context_length: int = 2_048,
+        context_length: int | None = 2_048,
         batch_size: int = 1_024,
         alias: str = "FlowState",
+        domain: str | None = None,
+        no_daily: bool = False,
+        gift_eval_compat: bool = False,
+        enforce_nonnegative: bool = True,
     ):
         """
         Initialize FlowState time series foundation model.
@@ -43,6 +48,8 @@ class FlowState(Forecaster, _DataProcessor):
 
                 - `ibm-research/flowstate` (default)
                 - `ibm-granite/granite-timeseries-flowstate-r1`.
+            revision (str, optional): Hugging Face Hub revision, branch, tag, or
+                commit SHA to load. Leave as None to use the repository default.
 
             scale_factor (float, optional): Scale factor for temporal adaptation.
                 If None, will be automatically determined based on the time series
@@ -51,12 +58,22 @@ class FlowState(Forecaster, _DataProcessor):
                 (quarter hourly with daily cycle), scale_factor = 24/96 = 0.25.
             context_length (int, optional): Maximum context length (input window size)
                 for the model. Controls how much history is used for each forecast.
-                Defaults to 2,048. The model supports flexible context lengths.
+                Defaults to 2,048. Set to None to use the model's configured context
+                length. The model supports flexible context lengths.
             batch_size (int, optional): Batch size for inference. Defaults to 1,024.
                 Adjust based on available memory and model size. Larger batch sizes
                 can improve throughput but require more GPU memory.
             alias (str, optional): Name to use for the model in output DataFrames and
                 logs. Defaults to "FlowState".
+            domain (str, optional): Dataset domain passed to FlowState's frequency
+                scaling helper. Used by GIFT-Eval compatibility mode.
+            no_daily (bool, optional): Whether to apply the GIFT-Eval no-daily
+                correction for datasets without daily cycles.
+            gift_eval_compat (bool, optional): Use the batching, missing-value, scale,
+                and nonnegative-clamping behavior from the public GIFT-Eval FlowState
+                wrapper.
+            enforce_nonnegative (bool, optional): In GIFT-Eval compatibility mode,
+                clamp predictions to zero for series whose context is nonnegative.
 
         Notes:
             **Academic Reference:**
@@ -84,20 +101,46 @@ class FlowState(Forecaster, _DataProcessor):
             - `ibm-granite/granite-timeseries-flowstate-r1`.
         """
         self.repo_id = repo_id
+        self.revision = revision
         self.scale_factor = scale_factor
         self.context_length = context_length
         self.batch_size = batch_size
         self.alias = alias
+        self.domain = domain
+        self.no_daily = no_daily
+        self.gift_eval_compat = gift_eval_compat
+        self.enforce_nonnegative = enforce_nonnegative
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.dtype = torch.float32
 
+    @staticmethod
+    def _trim_leading_nan(seq: torch.Tensor) -> torch.Tensor:
+        if not torch.isnan(seq).any():
+            return seq
+        finite = ~torch.isnan(seq)
+        if not finite.any():
+            return torch.zeros_like(seq)
+        first_valid = int(finite.to(torch.int64).argmax().item())
+        return seq[first_valid:]
+
+    def _resolve_scale_factors(self, freq: str) -> tuple[float, float]:
+        base_scale_factor = self.scale_factor or get_fixed_factor(freq, self.domain)
+        inference_scale_factor = base_scale_factor
+        if self.no_daily:
+            inference_scale_factor /= 7
+        return base_scale_factor, inference_scale_factor
+
     @contextmanager
     def _get_model(self) -> FlowStateForPrediction:
-        model = FlowStateForPrediction.from_pretrained(self.repo_id).to(self.device)
+        model = FlowStateForPrediction.from_pretrained(
+            self.repo_id,
+            revision=self.revision,
+        ).to(self.device)
         LOGGER.info(
-            "%s loading repo_id=%s device=%s cuda_available=%s",
+            "%s loading repo_id=%s revision=%s device=%s cuda_available=%s",
             self.alias,
             self.repo_id,
+            self.revision,
             self.device,
             torch.cuda.is_available(),
         )
@@ -119,7 +162,7 @@ class FlowState(Forecaster, _DataProcessor):
         scale_factor: float,
     ) -> tuple[np.ndarray, np.ndarray | None]:
         context = self._prepare_and_validate_context(batch)
-        if context.shape[1] > self.context_length:
+        if self.context_length is not None and context.shape[1] > self.context_length:
             context = context[..., -self.context_length :]
         context = self._maybe_impute_missing(context)
         context = context.unsqueeze(-1).to(self.device)
@@ -175,6 +218,129 @@ class FlowState(Forecaster, _DataProcessor):
                 tuple(fcst_mean_np.shape),
                 tuple(fcst_quantiles_np.shape),
             )
+        return fcst_mean_np, fcst_quantiles_np
+
+    def _gift_eval_batches(
+        self,
+        dataset: TimeSeriesDataset,
+        *,
+        model_context_length: int,
+        base_scale_factor: float,
+    ) -> tuple[list[torch.Tensor], list[list[int]], list[torch.Tensor]]:
+        max_context = int(model_context_length / base_scale_factor)
+        if self.context_length is not None:
+            max_context = min(max_context, self.context_length)
+        max_context = max(max_context, 1)
+
+        prepared = []
+        contexts_by_index: list[torch.Tensor] = [torch.empty(0)] * len(dataset.data)
+        for idx, seq in enumerate(dataset.data):
+            seq = self._trim_leading_nan(seq.to(dtype=self.dtype))
+            seq = seq[-min(max_context, len(seq)) :]
+            seq = self._trim_leading_nan(seq)
+            contexts_by_index[idx] = seq
+            prepared.append((len(seq), seq, idx))
+
+        prepared = sorted(prepared, key=lambda item: item[0])
+        batches: list[torch.Tensor] = []
+        batch_indices: list[list[int]] = []
+        current_length: int | None = None
+        current_tensors: list[torch.Tensor] = []
+        current_indices: list[int] = []
+
+        def flush_current() -> None:
+            if not current_tensors:
+                return
+            batch = torch.stack(current_tensors).unsqueeze(-1)
+            batches.append(batch)
+            batch_indices.append(current_indices.copy())
+
+        for context_length, seq, idx in prepared:
+            dynamic_batch_size = max(1, int(self.batch_size * model_context_length / max(context_length, 1)))
+            if (
+                current_tensors
+                and (
+                    context_length != current_length
+                    or len(current_tensors) >= dynamic_batch_size
+                )
+            ):
+                flush_current()
+                current_tensors = []
+                current_indices = []
+            current_length = context_length
+            current_tensors.append(seq)
+            current_indices.append(idx)
+        flush_current()
+        return batches, batch_indices, contexts_by_index
+
+    def _predict_gift_eval_compatible(
+        self,
+        model: FlowStateForPrediction,
+        dataset: TimeSeriesDataset,
+        h: int,
+        quantiles: list[float] | None,
+        supported_quantiles: list[float],
+        base_scale_factor: float,
+        inference_scale_factor: float,
+    ) -> tuple[np.ndarray, np.ndarray | None]:
+        model_context_length = int(model.config.context_length)
+        batches, batch_indices, contexts_by_index = self._gift_eval_batches(
+            dataset,
+            model_context_length=model_context_length,
+            base_scale_factor=base_scale_factor,
+        )
+        mean_by_index: list[np.ndarray | None] = [None] * len(dataset.data)
+        quantiles_by_index: list[np.ndarray | None] = [None] * len(dataset.data)
+
+        for batch, indices in tqdm(list(zip(batches, batch_indices, strict=True))):
+            with torch.inference_mode():
+                outputs = model(
+                    past_values=batch.to(self.device),
+                    prediction_length=h,
+                    scale_factor=inference_scale_factor,
+                    batch_first=True,
+                )
+            fcst_quantiles = outputs.quantile_outputs
+            if fcst_quantiles is None:
+                raise ValueError(f"{self.alias} did not return quantile outputs.")
+            if fcst_quantiles.ndim == 5 and fcst_quantiles.shape[0] == 1:
+                fcst_quantiles = fcst_quantiles.squeeze(0)
+            if fcst_quantiles.ndim == 4 and fcst_quantiles.shape[-1] == 1:
+                fcst_quantiles = fcst_quantiles.squeeze(-1)
+            if fcst_quantiles.ndim != 3:
+                raise ValueError(
+                    f"{self.alias} quantile output must have 3 dims after squeezing; got {tuple(fcst_quantiles.shape)}."
+                )
+            if fcst_quantiles.shape[1] == len(supported_quantiles) and fcst_quantiles.shape[2] >= h:
+                fcst_quantiles = fcst_quantiles[:, :, :h].transpose(1, 2)
+            elif fcst_quantiles.shape[2] == len(supported_quantiles) and fcst_quantiles.shape[1] >= h:
+                fcst_quantiles = fcst_quantiles[:, :h, :]
+            else:
+                raise ValueError(
+                    f"{self.alias} could not interpret quantile output shape {tuple(fcst_quantiles.shape)} "
+                    f"for horizon={h} and num_quantiles={len(supported_quantiles)}."
+                )
+            fcst_quantiles = fcst_quantiles.clone()
+            if self.enforce_nonnegative:
+                for batch_pos, original_idx in enumerate(indices):
+                    context = contexts_by_index[original_idx]
+                    if torch.all(torch.nan_to_num(context, nan=1.0) >= 0):
+                        fcst_quantiles[batch_pos] = torch.clamp(
+                            fcst_quantiles[batch_pos],
+                            min=0.0,
+                        )
+            fcst_quantiles_np = fcst_quantiles.detach().cpu().numpy()
+            median_idx = supported_quantiles.index(0.5)
+            for batch_pos, original_idx in enumerate(indices):
+                quantiles_by_index[original_idx] = fcst_quantiles_np[batch_pos]
+                mean_by_index[original_idx] = fcst_quantiles_np[batch_pos, :, median_idx]
+
+        fcst_mean_np = np.stack([value for value in mean_by_index if value is not None])
+        fcst_quantiles_np = (
+            np.stack([value for value in quantiles_by_index if value is not None])
+            if quantiles is not None
+            else None
+        )
         return fcst_mean_np, fcst_quantiles_np
 
     def _predict(
@@ -270,7 +436,7 @@ class FlowState(Forecaster, _DataProcessor):
             dtype=self.dtype,
         )
         fcst_df = dataset.make_future_dataframe(h=h, freq=freq)
-        scale_factor = self.scale_factor or get_fixed_factor(freq)
+        base_scale_factor, inference_scale_factor = self._resolve_scale_factors(freq)
         with self._get_model() as model:
             cfg = model.config
             supported_quantiles = cfg.quantiles
@@ -283,14 +449,25 @@ class FlowState(Forecaster, _DataProcessor):
                     f"supported quantiles are {supported_quantiles}, "
                     "please use the default quantiles or default level, "
                 )
-            fcsts_mean_np, fcsts_quantiles_np = self._predict(
-                model,
-                dataset,
-                h,
-                quantiles=qc.quantiles,
-                supported_quantiles=supported_quantiles,
-                scale_factor=scale_factor,
-            )
+            if self.gift_eval_compat:
+                fcsts_mean_np, fcsts_quantiles_np = self._predict_gift_eval_compatible(
+                    model,
+                    dataset,
+                    h,
+                    quantiles=qc.quantiles,
+                    supported_quantiles=supported_quantiles,
+                    base_scale_factor=base_scale_factor,
+                    inference_scale_factor=inference_scale_factor,
+                )
+            else:
+                fcsts_mean_np, fcsts_quantiles_np = self._predict(
+                    model,
+                    dataset,
+                    h,
+                    quantiles=qc.quantiles,
+                    supported_quantiles=supported_quantiles,
+                    scale_factor=inference_scale_factor,
+                )
         fcst_df[self.alias] = flatten_forecast_values(
             fcsts_mean_np,
             expected_rows=len(fcst_df),
