@@ -3,6 +3,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
 
+import numpy as np
 import pandas as pd
 import typer
 
@@ -33,6 +34,20 @@ MODEL_PRESETS = {
 }
 TTM_MAX_PREDICTION_LENGTH = 720
 TTM_FAMILY_MODELS = {"ttm", "ttm-r3"}
+TTM_RECURSIVE_MODELS = {"ttm-r3"}
+
+
+def _min_test_context_length(gift_eval: GIFTEval) -> int:
+    lengths: list[int] = []
+    for entry in gift_eval.dataset.test_data.input:
+        target = np.asarray(entry["target"])
+        if target.ndim == 1:
+            lengths.append(len(target))
+        else:
+            lengths.append(target.shape[1])
+    if not lengths:
+        raise ValueError("Could not determine TTM-R3 context length from empty test data.")
+    return min(lengths)
 
 
 def _build_models(
@@ -61,7 +76,12 @@ def _build_models(
             freq=gift_eval.dataset.freq,
         ),
         "ttm-r3": lambda: TTMR3(
-            batch_size=batch_size,
+            batch_size=16,
+            context_length=_min_test_context_length(gift_eval),
+            term=gift_eval.dataset.term.value,
+            use_lite=False,
+            gift_eval_compat=True,
+            rolling_norm=True,
         ),
         "flowstate": lambda: FlowState(
             repo_id="ibm-research/FlowState",
@@ -119,22 +139,26 @@ def _run_single_dataset(
         )
     logging.info("Using models: %s", model_names)
     logging.info("Prediction length; %s", gifteval.dataset.prediction_length)
-    ttm_family_models = [name for name in model_names if name in TTM_FAMILY_MODELS]
-    if ttm_family_models and gifteval.dataset.prediction_length > TTM_MAX_PREDICTION_LENGTH:
-        if model is not None and set(model).issubset(TTM_FAMILY_MODELS):
+    unsupported_ttm_models = [
+        name
+        for name in model_names
+        if name in TTM_FAMILY_MODELS and name not in TTM_RECURSIVE_MODELS
+    ]
+    if unsupported_ttm_models and gifteval.dataset.prediction_length > TTM_MAX_PREDICTION_LENGTH:
+        if model is not None and set(model).issubset(set(unsupported_ttm_models)):
             raise ValueError(
-                "TTM/TTM-R3 does not support this GIFT-Eval horizon in the current Granite "
+                "TTM does not support this GIFT-Eval horizon in the current Granite "
                 "model-selection path. "
                 f"Requested prediction_length={gifteval.dataset.prediction_length}, "
                 f"but the largest available Granite TTM checkpoint supports "
                 f"prediction_length<={TTM_MAX_PREDICTION_LENGTH}. "
                 "Use another model, or implement rolling/recursive forecasting outside the model."
             )
-        model_names = [name for name in model_names if name not in TTM_FAMILY_MODELS]
+        model_names = [name for name in model_names if name not in unsupported_ttm_models]
         logging.warning(
             "Skipping %s for dataset=%s term=%s because prediction_length=%s exceeds "
             "the supported maximum of %s for the current Granite TTM selection path.",
-            ttm_family_models,
+            unsupported_ttm_models,
             dataset_name,
             term,
             gifteval.dataset.prediction_length,
@@ -153,7 +177,7 @@ def _run_single_dataset(
             alias="TimeCopilot" if model_preset == "default" else "TimeCopilot-IBM",
         )
     )
-    direct_gift_eval_model = model_names in (["flowstate"], ["patchtst-fm"])
+    direct_gift_eval_model = model_names in (["flowstate"], ["patchtst-fm"], ["ttm-r3"])
     predictor = GluonTSPredictor(
         forecaster=forecaster,
         max_length=None if direct_gift_eval_model else 4_096,
