@@ -73,8 +73,8 @@ def _build_models(
             gift_eval_compat=True,
         ),
         "patchtst-fm": lambda: PatchTSTFM(
-            context_length=batch_size,
             batch_size=16,
+            gift_eval_compat=True,
         ),
     }
     unknown = sorted(set(model_names) - set(registry))
@@ -153,11 +153,11 @@ def _run_single_dataset(
             alias="TimeCopilot" if model_preset == "default" else "TimeCopilot-IBM",
         )
     )
-    flowstate_only = model_names == ["flowstate"]
+    direct_gift_eval_model = model_names in (["flowstate"], ["patchtst-fm"])
     predictor = GluonTSPredictor(
         forecaster=forecaster,
-        max_length=None if flowstate_only else 4_096,
-        impute_missing_values=not flowstate_only,
+        max_length=None if direct_gift_eval_model else 4_096,
+        impute_missing_values=not direct_gift_eval_model,
         batch_size=1_024,
     )
     gifteval.evaluate_predictor(predictor, batch_size=512)

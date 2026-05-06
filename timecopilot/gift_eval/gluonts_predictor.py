@@ -155,6 +155,15 @@ class GluonTSPredictor(RepresentablePredictor):
         h: int,
         freq: str,
     ) -> list[Forecast]:
+        if getattr(self.forecaster, "gift_eval_compat", False) and hasattr(
+            self.forecaster,
+            "predict_gluonts_batch",
+        ):
+            return self.forecaster.predict_gluonts_batch(
+                batch=batch,
+                h=h,
+                quantiles=self.quantiles,
+            )
         df, metadata = self._gluonts_dataset_to_df(batch)
         return self._predict_df(df=df, metadata=metadata, h=h, freq=freq)
 

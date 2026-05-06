@@ -1,6 +1,9 @@
 from contextlib import contextmanager
 import logging
+from typing import Any
 
+from gluonts.dataset.util import forecast_start
+from gluonts.model.forecast import QuantileForecast
 import numpy as np
 import pandas as pd
 import torch
@@ -37,6 +40,7 @@ class PatchTSTFM(Forecaster, _DataProcessor):
         context_length: int = 8192,  # default from granite-tsfm
         batch_size: int = 2_048,
         alias: str = "PatchTST-FM",
+        gift_eval_compat: bool = False,
     ):
         """
         Initialize PatchTSTFM time series foundation model.
@@ -55,6 +59,9 @@ class PatchTSTFM(Forecaster, _DataProcessor):
                 can improve throughput but require more GPU memory.
             alias (str, optional): Name to use for the model in output DataFrames and
                 logs. Defaults to "PatchTST-FM".
+            gift_eval_compat (bool, optional): Use the public GIFT-Eval PatchTST-FM
+                predictor path, which calls the Hugging Face model directly on
+                GluonTS input tensors.
 
         Notes:
             **Academic Reference:**
@@ -92,6 +99,7 @@ class PatchTSTFM(Forecaster, _DataProcessor):
         # )
         self.alias = alias
         self.dtype = torch.float32
+        self.gift_eval_compat = gift_eval_compat
 
     @contextmanager
     def _get_model(self) -> PatchTSTFMForPrediction:
@@ -112,6 +120,70 @@ class PatchTSTFM(Forecaster, _DataProcessor):
                 torch.cuda.empty_cache()
             elif self.device.startswith("mps"):
                 torch.mps.empty_cache()
+
+    def _preprocess_gift_eval_target(self, target: np.ndarray) -> torch.Tensor:
+        target = np.asarray(target, dtype=np.float32)
+        if np.isnan(target).any():
+            if np.isnan(target).all():
+                target = np.zeros_like(target)
+            else:
+                target = np.nan_to_num(target, nan=np.nanmean(target))
+        return torch.from_numpy(target).float().to(self.device)
+
+    def predict_gluonts_batch(
+        self,
+        batch: list[Any],
+        h: int,
+        quantiles: list[float] | None,
+    ) -> list[QuantileForecast]:
+        quantile_levels = DEFAULT_QUANTILES if quantiles is None else quantiles
+        input_ndim = np.asarray(batch[0]["target"]).ndim
+        targets = [
+            self._preprocess_gift_eval_target(entry["target"])
+            for entry in batch
+        ]
+        with self._get_model() as model:
+            with torch.no_grad():
+                outputs = model(
+                    past_values=targets,
+                    prediction_length=h,
+                    quantile_levels=quantile_levels,
+                )
+        quantile_outputs = outputs.quantile_outputs
+        if quantile_outputs is None:
+            raise ValueError(f"{self.alias} did not return quantile outputs.")
+        if isinstance(quantile_outputs, list):
+            forecast_arrays = [
+                (item.squeeze(-1) if input_ndim == 1 else item).cpu().numpy()
+                for item in quantile_outputs
+            ]
+        else:
+            fcst = quantile_outputs
+            if fcst.ndim == 4 and fcst.shape[-1] == 1:
+                fcst = fcst.squeeze(-1)
+            if fcst.ndim != 3:
+                raise ValueError(
+                    f"{self.alias} quantile output must have 3 dims after squeezing; got {tuple(fcst.shape)}."
+                )
+            if fcst.shape[1] == len(quantile_levels) and fcst.shape[2] >= h:
+                fcst = fcst[:, :, :h]
+            elif fcst.shape[2] == len(quantile_levels) and fcst.shape[1] >= h:
+                fcst = fcst[:, :h, :].transpose(1, 2)
+            else:
+                raise ValueError(
+                    f"{self.alias} could not interpret quantile output shape {tuple(fcst.shape)} "
+                    f"for horizon={h} and num_quantiles={len(quantile_levels)}."
+                )
+            forecast_arrays = [item.cpu().numpy() for item in fcst]
+        return [
+            QuantileForecast(
+                forecast_arrays=forecast_array,
+                forecast_keys=[str(q) for q in quantile_levels],
+                item_id=entry.get("item_id"),
+                start_date=forecast_start(entry),
+            )
+            for forecast_array, entry in zip(forecast_arrays, batch, strict=True)
+        ]
 
     def _predict_batch(
         self,
