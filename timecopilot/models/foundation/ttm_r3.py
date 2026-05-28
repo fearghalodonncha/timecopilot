@@ -324,6 +324,32 @@ class TTMR3(Forecaster, _DataProcessor):
         context = self._maybe_impute_missing(context)
         context = context.unsqueeze(-1).to(self.device)
         observed_mask = observed_mask.unsqueeze(-1).to(self.device)
+        if h > TTM_MAX_FORECAST_HORIZON:
+            quantile_outputs = self._predict_gift_batch_tensor(
+                model=model,
+                past_values=context,
+                past_observed_mask=observed_mask,
+                h=h,
+                num_channels=1,
+            )
+            median_idx = self.quantile_list.index(0.5)
+            point_fcst = quantile_outputs[:, median_idx, :, 0]
+            point_fcst_np = point_fcst.detach().cpu().numpy()
+
+            quantile_fcst_np = None
+            if quantiles is not None:
+                index_map = {round(q, 6): idx for idx, q in enumerate(self.quantile_list)}
+                try:
+                    selected_idx = [index_map[round(q, 6)] for q in quantiles]
+                except KeyError as exc:
+                    raise ValueError(
+                        f"{self.alias} does not support requested quantiles {quantiles}. "
+                        f"Available quantiles are {self.quantile_list}."
+                    ) from exc
+                quantile_fcst = quantile_outputs[:, selected_idx, :, 0]
+                quantile_fcst_np = quantile_fcst.detach().cpu().numpy()
+            return point_fcst_np, quantile_fcst_np
+
         outputs = model(
             past_values=context,
             past_observed_mask=observed_mask,

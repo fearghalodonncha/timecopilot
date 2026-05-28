@@ -14,6 +14,7 @@ from ..utils.forecaster import Forecaster, QuantileConverter, _DataProcessor
 from .utils import TimeSeriesDataset, flatten_forecast_values
 
 LOGGER = logging.getLogger(__name__)
+UPSTREAM_LOGGER = logging.getLogger("tsfm_public.models.patchtst_fm.modeling_patchtst_fm")
 
 # default to the median quantile
 # PatchTST-FM supports quantiles from 0.01 to 0.99
@@ -104,12 +105,15 @@ class PatchTSTFM(Forecaster, _DataProcessor):
     @contextmanager
     def _get_model(self) -> PatchTSTFMForPrediction:
         model = PatchTSTFMForPrediction.from_pretrained(self.repo_id).to(self.device)
+        UPSTREAM_LOGGER.setLevel(logging.WARNING)
         LOGGER.info(
-            "%s loading repo_id=%s device=%s cuda_available=%s",
+            "%s loading repo_id=%s device=%s cuda_available=%s input_context_cap=%s model_context_length=%s",
             self.alias,
             self.repo_id,
             self.device,
             torch.cuda.is_available(),
+            self.context_length,
+            getattr(model.config, "context_length", None),
         )
         try:
             model.eval()
@@ -128,7 +132,10 @@ class PatchTSTFM(Forecaster, _DataProcessor):
                 target = np.zeros_like(target)
             else:
                 target = np.nan_to_num(target, nan=np.nanmean(target))
-        return torch.from_numpy(target).float().to(self.device)
+        tensor = torch.from_numpy(target).float()
+        if tensor.shape[-1] > self.context_length:
+            tensor = tensor[..., -self.context_length :]
+        return tensor.to(self.device)
 
     def predict_gluonts_batch(
         self,

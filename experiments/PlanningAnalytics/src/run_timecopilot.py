@@ -328,7 +328,7 @@ def _build_forecaster_model(name: str, *, flowstate_scale_factor: float = 2.0):
         )
     if name == "ibm-granite-tsfm":
         return MedianEnsemble(
-            models=[_patch("ibm-granite/granite-timeseries-patchtst", "granite-patchtst"), _flow("ibm-granite/granite-timeseries-flowstate-r1", "granite-flowstate"), _ttm()],
+            models=[_patch("ibm-granite/granite-timeseries-patchtst-fm-r1", "granite-patchtst"), _flow("ibm-granite/granite-timeseries-flowstate-r1", "granite-flowstate"), _ttm()],
             alias="ibm-granite-tsfm",
         )
     raise ValueError(f"Unsupported forecaster model: {name}")

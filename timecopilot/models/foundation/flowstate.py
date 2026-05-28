@@ -437,6 +437,13 @@ class FlowState(Forecaster, _DataProcessor):
         )
         fcst_df = dataset.make_future_dataframe(h=h, freq=freq)
         base_scale_factor, inference_scale_factor = self._resolve_scale_factors(freq)
+        LOGGER.info(
+            "%s scale factors: base=%s inference=%s no_daily=%s",
+            self.alias,
+            base_scale_factor,
+            inference_scale_factor,
+            self.no_daily,
+        )
         with self._get_model() as model:
             cfg = model.config
             supported_quantiles = cfg.quantiles

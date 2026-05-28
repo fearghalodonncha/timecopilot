@@ -26,6 +26,7 @@ DEFAULT_GRANULARITIES = [
     "BN_Leaf_PL_Total",
     "BN_Lvl1_PL_Total",
 ]
+DEFAULT_COHORTS = ["active", "most-active"]
 
 
 @dataclass(frozen=True)
@@ -33,16 +34,18 @@ class Experiment:
     granularity: str
     label: str
     selection_path: Path
+    runner_args: tuple[str, ...] = ()
 
 
 def _experiments() -> list[Experiment]:
+    active_runner_args = ("--target-column", "value", "--min-history", "0")
     return [
         Experiment("BN_Leaf_PL_Leaf", "most-active", SELECTED_SERIES_DIR / "clean_series_leaf_48_12.csv"),
-        Experiment("BN_Leaf_PL_Leaf", "active", ACTIVE_SERIES_DIR),
+        Experiment("BN_Leaf_PL_Leaf", "active", ACTIVE_SERIES_DIR, active_runner_args),
         Experiment("BN_Leaf_PL_Total", "most-active", SELECTED_SERIES_DIR / "clean_series_leaf_total_48_12.csv"),
-        Experiment("BN_Leaf_PL_Total", "active", ACTIVE_SERIES_DIR),
+        Experiment("BN_Leaf_PL_Total", "active", ACTIVE_SERIES_DIR, active_runner_args),
         Experiment("BN_Lvl1_PL_Total", "most-active", SELECTED_SERIES_DIR / "clean_series_lvl1_total_48_12.csv"),
-        Experiment("BN_Lvl1_PL_Total", "active", ACTIVE_SERIES_DIR),
+        Experiment("BN_Lvl1_PL_Total", "active", ACTIVE_SERIES_DIR, active_runner_args),
     ]
 
 
@@ -71,6 +74,7 @@ def _build_command(
         "--series-selection",
         str(experiment.selection_path),
     ]
+    command.extend(experiment.runner_args)
     for model in models:
         command.extend(["--model", model])
     if continue_on_error:
@@ -91,6 +95,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--country", action="append", choices=DEFAULT_COUNTRIES)
     parser.add_argument("--granularity", action="append", choices=DEFAULT_GRANULARITIES)
+    parser.add_argument("--cohort", action="append", choices=DEFAULT_COHORTS)
     parser.add_argument("--model", action="append", default=None)
     parser.add_argument(
         "--transform",
@@ -107,6 +112,7 @@ def main() -> None:
     args = _parse_args()
     countries = args.country or DEFAULT_COUNTRIES
     granularities = set(args.granularity or DEFAULT_GRANULARITIES)
+    cohorts = set(args.cohort or DEFAULT_COHORTS)
     models = args.model or DEFAULT_MODELS
     extra_args = args.extra_args
     if extra_args and extra_args[0] == "--":
@@ -115,7 +121,7 @@ def main() -> None:
     experiments = [
         experiment
         for experiment in _experiments()
-        if experiment.granularity in granularities
+        if experiment.granularity in granularities and experiment.label in cohorts
     ]
     commands = [
         _build_command(

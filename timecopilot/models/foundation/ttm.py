@@ -50,9 +50,14 @@ class TTM(Forecaster, _DataProcessor):
         h: int,
     ) -> np.ndarray:
         context = self._prepare_and_validate_context(batch)
-        if context.shape[1] > self.context_length:
-            context = context[..., -self.context_length :]
+        model_context_length = getattr(model.config, "context_length", self.context_length)
+        effective_context_length = min(self.context_length, model_context_length)
+        if context.shape[1] > effective_context_length:
+            context = context[..., -effective_context_length:]
         context = self._maybe_impute_missing(context)
+        if context.shape[1] < model_context_length:
+            pad = model_context_length - context.shape[1]
+            context = torch.nn.functional.pad(context, (pad, 0), value=0.0)
         context = context.unsqueeze(-1).to(self.device)
         fcst = model(context, return_loss=False).prediction_outputs
         fcst = fcst[..., 0]
